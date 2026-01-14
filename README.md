@@ -186,7 +186,7 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 **Alok Kumar**
 - Email: [alokkumar2812@gmail.com](mailto:alokkumar2812@gmail.com)
-- GitHub: [@0248](https://github.com/alok0248)
+- GitHub: [alok0248](https://github.com/alok0248)
 
 ## ⚠️ Disclaimer
 
