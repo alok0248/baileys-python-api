@@ -1,5 +1,7 @@
 import express from "express";
-import { startWhatsApp, getQR,getSock } from "./whatsapp.js";
+import { startWhatsApp, getQR,getSock,
+        getUserInfo ,getLastMessageByJid,
+        normalizeUserJid} from "./whatsapp.js";
 import { getMessages } from "./messages.js";
 import { getReceipts } from "./receipts.js";
 import { getUserDetails, getGroupDetails, 
@@ -82,12 +84,18 @@ const PORT = 3000;
     });
 
 
+app.get("/me", (_req, res) => {
+  const user = getUserInfo();
 
+  if (!user) {
+    return res.status(404).json({ error: "Not logged in" });
+  }
 
-
-
-
-
+  res.json({
+    id: user.id,
+    name: user.name
+  });
+});
     
 app.listen(PORT, async () => {
   console.log(`🚀 Baileys server running on ${PORT}`);
@@ -141,12 +149,20 @@ app.post("/send/media", async (req, res) => {
       return res.status(400).json({ error: "'to' and 'filePath' are required" });
     }
 
-    if (!fs.existsSync(filePath)) {
-      return res.status(404).json({ error: "File not found" });
+    const resolvedPath = resolveFilePath(filePath);
+
+    if (!fs.existsSync(resolvedPath)) {
+    return res.status(404).json({
+        error: "File not found",
+        path: resolvedPath
+      });
     }
+    
 
     const jid = normalizeJid(to);
-    const buffer = fs.readFileSync(filePath);
+
+    const buffer = fs.readFileSync(resolvedPath);
+    const fileName = path.basename(resolvedPath);
 
     const mimeType = mime.lookup(filePath) || "application/octet-stream";
 
@@ -201,3 +217,36 @@ function normalizeJid(to: string): string {
   // phone number → WhatsApp user JID
   return `${to}@s.whatsapp.net`;
 }
+
+function resolveFilePath(inputPath: string): string {
+  if (!inputPath) {
+    throw new Error("filePath is required");
+  }
+
+  // Normalize slashes + resolve to absolute path
+  const resolved = path.isAbsolute(inputPath)
+    ? path.normalize(inputPath)
+    : path.resolve(inputPath);
+
+  return resolved;
+}
+
+app.get("/last-message/:user", (req, res) => {
+  try {
+    const user = req.params.user
+    const jid = normalizeUserJid(user)
+
+    const lastMessage = getLastMessageByJid(jid)
+
+    if (!lastMessage) {
+      return res.status(404).json({
+        error: "No messages found for this user"
+      })
+    }
+
+    res.json(lastMessage)
+  } catch (err: any) {
+    res.status(500).json({ error: err.message })
+  }
+})
+

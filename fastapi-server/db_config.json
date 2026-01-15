@@ -1,0 +1,4 @@
+{
+  "engine": "sqlite",
+  "sqlite_path": "data/whatsapp.db"
+}

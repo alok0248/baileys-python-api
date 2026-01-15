@@ -3,18 +3,45 @@ import makeWASocket, {
   fetchLatestBaileysVersion
 } from "@whiskeysockets/baileys";
 import qrcode from "qrcode";
-
+import * as fs from "fs";
+import * as path from "path";
 import { getAuthState } from "./state.js";
 import { addMessage } from "./messages.js";
 import { addReceipt } from "./receipts.js";
 import { pushToFastAPI } from "./webhook.js";
 import { saveIncomingMedia } from "./media.js";
 
+const AUTH_DIR = path.join(process.cwd(), "auth");
+let connectionState: "idle" | "logging_in" | "connected" = "idle"
+let lastAuthReset = 0
+let isRestarting = false
+let connectionPhase: "idle" | "connecting" | "connected" = "idle"
+const AUTH_RESET_COOLDOWN_MS = 15_000 // 15 seconds
+
+
+
+
+function resetAuth() {
+  try {
+    if (fs.existsSync(AUTH_DIR)) {
+      fs.rmSync(AUTH_DIR, { recursive: true, force: true });
+      console.log("🧹 Auth state reset");
+    }
+  } catch (err) {
+    console.error("Failed to reset auth:", err);
+  }
+}
 /* =========================
    SOCKET & STATE
    ========================= */
 let sock: any = null;
 let latestQR: string | null = null;
+
+/* =========================
+  Get the user details
+   ========================= */
+
+let userInfo: { id?: string; name?: string } | null = null
 
 /* =========================
    CUSTOM CHAT STORE (SAFE)
@@ -28,6 +55,10 @@ export function getSock() {
   return sock;
 }
 
+export function getUserInfo() {
+  return userInfo;
+}
+
 export function getQR() {
   return latestQR;
 }
@@ -35,6 +66,25 @@ export function getQR() {
 export function getAllChats() {
   return Array.from(chatStore.values());
 }
+
+export function getLastMessageByJid(jid: string) {
+  const chat = chatStore.get(jid)
+  if (!chat || !chat.lastMessage) return null
+
+  return {
+    jid: chat.jid,
+    name: chat.name,
+    type: chat.type,
+    message: chat.lastMessage,
+    timestamp: chat.lastTimestamp
+  }
+}
+
+export function normalizeUserJid(input: string): string {
+  if (input.includes("@")) return input
+  return `${input}@s.whatsapp.net`
+}
+
 
 /* =========================
    MAIN START FUNCTION
@@ -59,27 +109,80 @@ export async function startWhatsApp() {
      CONNECTION / QR
      ========================= */
   sock.ev.on("connection.update", async (update) => {
-    const { connection, lastDisconnect, qr } = update;
+  const { connection, lastDisconnect, qr } = update
 
-    if (qr) {
-      latestQR = await qrcode.toDataURL(qr);
+  // QR generation
+  if (qr) {
+    latestQR = await qrcode.toDataURL(qr)
+    connectionPhase = "idle"
+    return
+  }
+
+  // Connection opened
+  if (connection === "open") {
+    connectionPhase = "connected"
+    isRestarting = false
+
+    latestQR = null
+    userInfo = state.creds.me ?? null
+
+    console.log("✅ WhatsApp connected")
+    if (userInfo) {
+      console.log(`👤 Logged in as ${userInfo.name} (${userInfo.id})`)
+    }
+    return
+  }
+
+  // Connection closed
+  if (connection === "close") {
+    const statusCode =
+      (lastDisconnect?.error as any)?.output?.statusCode
+
+    console.log("❌ WhatsApp connection closed:", statusCode)
+
+    // ⛔ Ignore closes while connecting (VERY IMPORTANT)
+    if (connectionPhase === "connecting") {
+      console.log("⏳ Ignoring close during connection handshake")
+      return
     }
 
-    if (connection === "close") {
-      const shouldReconnect =
-        (lastDisconnect?.error as any)?.output?.statusCode !==
-        DisconnectReason.loggedOut;
+    userInfo = null
+    latestQR = null
 
-      if (shouldReconnect) {
-        startWhatsApp();
+    // 🔴 Logged out for real → reset auth ONCE
+    if (statusCode === DisconnectReason.loggedOut) {
+      if (isRestarting) {
+        console.log("🛑 Restart already in progress, skipping")
+        return
       }
+
+      console.log("🔄 Logged out. Resetting auth and requesting new login…")
+      isRestarting = true
+      connectionPhase = "idle"
+
+      resetAuth()
+
+      setTimeout(() => {
+        connectionPhase = "connecting"
+        startWhatsApp()
+      }, 3000)
+
+      return
     }
 
-    if (connection === "open") {
-      console.log("✅ WhatsApp logged in successfully");
-      latestQR = null;
-    }
-  });
+    // ⚠️ Network / transient issue → reconnect
+    console.log("🔁 Temporary disconnect, reconnecting…")
+    if (isRestarting) return
+
+    isRestarting = true
+    connectionPhase = "connecting"
+
+    setTimeout(() => {
+      startWhatsApp()
+    }, 3000)
+  }
+});
+
 
   /* =========================
      CHAT METADATA UPDATES
@@ -165,8 +268,23 @@ export async function startWhatsApp() {
     chatStore.set(jid, chat);
 
     addMessage(payload);
-    pushToFastAPI(payload);
-  });
+    for (const msg of m.messages) {
+
+        if (msg.key?.remoteJid === "status@broadcast") {
+          const jid = msg.key.remoteJid;
+          /*const jid = msg.key.participant_lid || msg.key.participant;*/
+          const phone = msg.key.participant?.split("@")[0] || null;
+          const name = msg.pushName || null;
+
+          pushToFastAPI({
+            type: "presence",
+            jid,
+            phone,
+            name,
+            offline: msg.key.offline === "1" ? true : false,
+            timestamp: Date.now()
+          });}}
+      });
 
   /* =========================
      DELIVERY / READ RECEIPTS
@@ -193,5 +311,9 @@ export async function startWhatsApp() {
       pushToFastAPI({ type: "receipt", ...payload });
     }
   });
+
+
+  
+
 }
 
