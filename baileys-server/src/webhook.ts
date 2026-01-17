@@ -4,8 +4,11 @@ import fetch from "node-fetch";
  * Webhook endpoints
  * (FastAPI side already has these)
  */
-const FASTAPI_MESSAGE_WEBHOOK = "http://localhost:8000/webhook/message";
-const FASTAPI_RECEIPT_WEBHOOK = "http://localhost:8000/webhook/receipt";
+const FASTAPI_HOST = process.env.FASTAPI_HOST || "localhost";
+const FASTAPI_PORT = process.env.FASTAPI_PORT || "3002";
+const FASTAPI_BASE = `http://${FASTAPI_HOST}:${FASTAPI_PORT}`;
+const FASTAPI_MESSAGE_WEBHOOK = `${FASTAPI_BASE}/webhook/message`;
+const FASTAPI_RECEIPT_WEBHOOK = `${FASTAPI_BASE}/webhook/receipt`;
 
 /**
  * Push events to FastAPI

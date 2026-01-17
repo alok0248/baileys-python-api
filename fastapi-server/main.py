@@ -1,23 +1,81 @@
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse, HTMLResponse
+from fastapi.openapi.utils import get_openapi
+from fastapi.openapi.docs import get_swagger_ui_html
 from pydantic import BaseModel
 import requests
 import base64
 import io
-from db import init_db
-from db_ops import insert_message, update_message_status
-from db_ops import insert_message
+import os
+import json
+import shutil
 import time
 import uuid
+import uvicorn
+from dotenv import load_dotenv
+from db import init_db
+from db_ops import insert_message, update_message_status
 from db_ops import update_contact_presence
 from config import NODE_BASE_URL
+from db_ops import insert_media_message
+
+
+ENV_PATH = os.path.join(os.path.dirname(__file__), "..", ".env")
+if os.path.isfile(ENV_PATH):
+    load_dotenv(ENV_PATH)
+
+CONFIG_FILE = os.path.join(os.path.dirname(__file__), "db_config.json")
+
+try:
+    with open(CONFIG_FILE, "r") as f:
+        _config = json.load(f)
+except Exception:
+    _config = {}
+
+_base_path = _config.get("base_path")
+_user_name = _config.get("user")
+
+if _base_path and _user_name:
+    OUTGOING_BASE_DIR = os.path.join(_base_path, _user_name, "outgoing")
+elif _base_path:
+    OUTGOING_BASE_DIR = os.path.join(_base_path, "outgoing")
+else:
+    OUTGOING_BASE_DIR = None
+
+if OUTGOING_BASE_DIR:
+    os.makedirs(OUTGOING_BASE_DIR, exist_ok=True)
+
+
+def normalize_outgoing_path(file_path: str) -> str:
+    src = os.path.abspath(file_path)
+
+    if not OUTGOING_BASE_DIR:
+        return src
+
+    name = os.path.basename(src)
+    dst = os.path.join(OUTGOING_BASE_DIR, name)
+
+    if src == dst:
+        return dst
+
+    try:
+        shutil.copy2(src, dst)
+        return dst
+    except Exception:
+        return src
+
 
 app = FastAPI(
     title="Baileys FastAPI Bridge",
     description="FastAPI bridge for Baileys WhatsApp server",
-    version="1.0.0"
+    version="1.0.0",
+    docs_url="/docs",
+    redoc_url="/redoc",
+    openapi_url="/openapi.json",
 )
 init_db()
+
+
 # ============================================================
 # 🔍 HEALTH
 # ============================================================
@@ -116,7 +174,7 @@ def send_message(data: SendMessage):
         json=data.dict(),
         timeout=5
     )
-    message_id = str(uuid.uuid4())
+    message_id =  str(uuid.uuid4())
     now = int(time.time() * 1000)
     # 🔹 Save outgoing message FIRST
     insert_message(
@@ -142,7 +200,20 @@ def get_messages():
     """Get received messages"""
     r = requests.get(f"{NODE_BASE_URL}/messages", timeout=5)
     r.raise_for_status()
-    return r.json()
+    data = r.json()
+
+    if isinstance(data, list):
+        for msg in data:
+            if not isinstance(msg, dict):
+                continue
+            phone = msg.get("phone")
+            if phone:
+                original_from = msg.get("from")
+                if original_from and "jid" not in msg:
+                    msg["jid"] = original_from
+                msg["from"] = phone
+
+    return data
 
 
 # ============================================================
@@ -159,21 +230,25 @@ class SendMedia(BaseModel):
 def send_media(data: SendMedia):
     message_id = str(uuid.uuid4())
     now = int(time.time() * 1000)
-    """Send media (image/video/audio/document)"""
+    resolved_path = normalize_outgoing_path(data.filePath)
+
     r = requests.post(
         f"{NODE_BASE_URL}/send/media",
-        json=data.model_dump(),
+        json={
+            "to": data.to,
+            "filePath": resolved_path,
+            "caption": data.caption
+        },
         timeout=30
     )
     r.raise_for_status()
-    # 🔹 Store outgoing media message
     insert_message(
         message_id=message_id,
         jid=data.to,
         direction="out",
         message_type="media",
         content=data.caption,
-        media_path=data.filePath,
+        media_path=resolved_path,
         timestamp=now,
         status="sent"
     )
@@ -228,15 +303,22 @@ async def webhook_receipt(request: Request):
 async def webhook_message(request: Request):
     payload = await request.json()
 
+    content_text = (
+        payload.get("message")
+        or payload.get("text")
+        or payload.get("body")
+    )
+
     insert_message(
         message_id=payload.get("messageId"),
         jid=payload.get("from"),
         direction="in",
         message_type="text",
-        content=payload.get("message"),
+        content=content_text,
         media_path=None,
         timestamp=payload.get("timestamp"),
-        status="delivered"
+        status="delivered",
+        phone=payload.get("phone"),
     )
 
     print("📩 Stored message:", payload)
@@ -348,3 +430,40 @@ async def webhook_presence(request: Request):
 
     print("👤 Presence updated:", payload)
     return {"status": "ok"}
+@app.post("/webhook/media")
+async def webhook_media(request: Request):
+    payload = await request.json()
+
+    caption_text = (
+        payload.get("caption")
+        or payload.get("message")
+        or payload.get("text")
+        or payload.get("body")
+    )
+
+    insert_media_message(
+        message_id=payload.get("messageId"),
+        jid=payload.get("from"),
+        direction=payload.get("direction", "in"),
+        message_type=payload.get("messageType", "media"),
+        content=caption_text,
+        media_path=payload.get("filePath"),
+        timestamp=payload.get("timestamp"),
+        status="delivered",
+        phone=payload.get("phone"),
+    )
+
+    print("🖼️ Media stored:", payload.get("filePath"))
+    return {"status": "ok"}
+
+
+if __name__ == "__main__":
+    fastapi_host = os.getenv("FASTAPI_HOST", "0.0.0.0")
+    fastapi_port = int(os.getenv("FASTAPI_PORT", "3002"))
+
+    uvicorn.run(
+        "main:app",
+        host=fastapi_host,
+        port=fastapi_port,
+        reload=False
+    )

@@ -202,6 +202,34 @@ export async function startWhatsApp() {
     }
   });
 
+  function extractPhoneFromMessage(msg: any): string | null {
+    const jid = msg?.key?.remoteJid as string | undefined;
+    if (!jid) return null;
+
+    const remoteJidAlt = (msg.key as any).remoteJidAlt as string | undefined;
+    const participantAlt = (msg.key as any).participantAlt as string | undefined;
+
+    if (jid.endsWith("@g.us")) {
+      const rawParticipant =
+        (participantAlt as string | undefined) ||
+        (msg.key.participant as string | undefined);
+
+      if (rawParticipant && rawParticipant.endsWith("@s.whatsapp.net")) {
+        return rawParticipant.split("@")[0];
+      }
+
+      return null;
+    }
+
+    const userJid = (remoteJidAlt as string | undefined) || jid;
+
+    if (userJid && userJid.endsWith("@s.whatsapp.net")) {
+      return userJid.split("@")[0];
+    }
+
+    return null;
+  }
+
   /* =========================
      INCOMING MESSAGES
      ========================= */
@@ -213,15 +241,23 @@ export async function startWhatsApp() {
         msg.message?.audioMessage ||
         msg.message?.documentMessage) {
 
+      const phone = extractPhoneFromMessage(msg);
+
       saveIncomingMedia(msg).then((media) => {
         pushToFastAPI({
           type: "media",
+          direction: "in",
           from: msg.key.remoteJid,
-          file: media.fileName,
+          phone,
+          messageId: msg.key.id,
+          messageType: "media",
+          filePath: media.filePath,
+          fileName: media.fileName,
           mimeType: media.mimeType,
+          caption: media.caption,
           timestamp: Date.now()
         });
-      });
+      }).catch(() => {});
 
       return;
     }
@@ -236,15 +272,7 @@ export async function startWhatsApp() {
     if (!text) return;
 
     const jid = msg.key.remoteJid!;
-    let phone: string | null = null;
-
-    if (jid.endsWith("@s.whatsapp.net")) {
-      phone = jid.split("@")[0];
-    }
-
-    if (jid.endsWith("@g.us") && msg.key.participant) {
-      phone = msg.key.participant.split("@")[0];
-    }
+    const phone = extractPhoneFromMessage(msg);
 
     const payload = {
       from: jid,
@@ -252,6 +280,12 @@ export async function startWhatsApp() {
       message: text,
       timestamp: Date.now()
     };
+
+    pushToFastAPI({
+      type: "message",
+      messageId: msg.key.id,
+      ...payload
+    });
 
     // update chat store
     const chat = chatStore.get(jid) || {

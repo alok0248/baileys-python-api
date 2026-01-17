@@ -1,4 +1,7 @@
 {
   "engine": "sqlite",
-  "sqlite_path": "data/whatsapp.db"
+  "sqlite_path": "data/appdb.db",
+  "base_path": "B:/whatsapp_store",
+  "user": "default",
+  "postgres_dsn": "postgresql://appuser:apppassword@postgres:5432/appdb"
 }

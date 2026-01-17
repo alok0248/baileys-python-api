@@ -28,7 +28,7 @@ app.get("/health", (_, res) => {
   res.json({ status: "ok" });
 });
 
-const PORT = 3000;
+const PORT = process.env.NODE_PORT ? Number(process.env.NODE_PORT) : 3000;
 
   // Get user details (1-to-1)
   app.get("/user/:phone", async (req, res) => {

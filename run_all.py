@@ -21,6 +21,8 @@ REQUIRED_PY_PACKAGES = [
     "fastapi",
     "uvicorn",
     "requests",
+    "psycopg2-binary",
+    "python-dotenv",
 ]
 
 
@@ -89,12 +91,13 @@ def ensure_node_modules():
 # Process management
 # -----------------------------
 
-def start_process(cmd, cwd, name):
+def start_process(cmd, cwd, name, env=None):
     print(f" Starting {name}...")
     return subprocess.Popen(
         cmd,
         cwd=cwd,
         shell=True,
+        env=env,
         creationflags=subprocess.CREATE_NEW_PROCESS_GROUP
         if sys.platform == "win32"
         else 0,
@@ -116,6 +119,7 @@ def stop_all():
 # Main
 # -----------------------------
 
+
 def main():
     try:
         print(" First-time environment check...\n")
@@ -124,24 +128,49 @@ def main():
         ensure_python_packages()
         ensure_node_modules()
 
-        print("\n Starting services...\n")
+        try:
+            from dotenv import load_dotenv  # type: ignore
 
-        # Start Baileys (Node)
+            env_path = os.path.join(BASE_DIR, ".env")
+            if os.path.isfile(env_path):
+                load_dotenv(env_path)
+                print(f" Loaded environment from {env_path}")
+        except Exception:
+            pass
+
+        node_port = os.getenv("NODE_PORT", "3000")
+        fastapi_host = os.getenv("FASTAPI_HOST", "127.0.0.1")
+        fastapi_port = os.getenv("FASTAPI_PORT", "3002")
+
+        print("\n Starting services...\n")
+        print(f" Baileys on port {node_port}")
+        print(f" FastAPI on {fastapi_host}:{fastapi_port}\n")
+
+        env_node = os.environ.copy()
+        env_node["NODE_PORT"] = node_port
+        env_node["FASTAPI_HOST"] = fastapi_host
+        env_node["FASTAPI_PORT"] = fastapi_port
+
         baileys = start_process(
             "npm start",
             BAILEYS_DIR,
             "Baileys WhatsApp Server",
+            env=env_node,
         )
         processes.append(baileys)
 
-        # Give Node time to boot
         time.sleep(3)
 
-        # Start FastAPI (same Python interpreter / venv)
+        fastapi_cmd = (
+            f'"{sys.executable}" -m uvicorn main:app '
+            f'--host {fastapi_host} --port {fastapi_port} --reload'
+        )
+
         fastapi = start_process(
-            f'"{sys.executable}" -m uvicorn main:app --reload --port 8000',
+            fastapi_cmd,
             FASTAPI_DIR,
             "FastAPI Server",
+            env=os.environ.copy(),
         )
         processes.append(fastapi)
 
