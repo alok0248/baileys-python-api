@@ -51,6 +51,11 @@ def init_db():
     )
     """)
 
+    try:
+        cur.execute("ALTER TABLE login_sessions ADD COLUMN created_at_str TEXT")
+    except Exception:
+        pass
+
     cur.execute("""
 CREATE TABLE IF NOT EXISTS contacts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -64,6 +69,21 @@ CREATE TABLE IF NOT EXISTS contacts (
     updated_at INTEGER
 )
 """)
+
+    try:
+        cur.execute("ALTER TABLE contacts ADD COLUMN last_seen_at_str TEXT")
+    except Exception:
+        pass
+
+    try:
+        cur.execute("ALTER TABLE contacts ADD COLUMN created_at_str TEXT")
+    except Exception:
+        pass
+
+    try:
+        cur.execute("ALTER TABLE contacts ADD COLUMN updated_at_str TEXT")
+    except Exception:
+        pass
 
     cur.execute("""
     CREATE TABLE IF NOT EXISTS messages (
@@ -81,6 +101,16 @@ CREATE TABLE IF NOT EXISTS contacts (
     )
     """)
 
+    try:
+        cur.execute("ALTER TABLE messages ADD COLUMN timestamp_str TEXT")
+    except Exception:
+        pass
+
+    try:
+        cur.execute("ALTER TABLE messages ADD COLUMN created_at_str TEXT")
+    except Exception:
+        pass
+
     cur.execute("""
     CREATE TABLE IF NOT EXISTS message_comments (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -90,6 +120,11 @@ CREATE TABLE IF NOT EXISTS contacts (
         FOREIGN KEY(message_id) REFERENCES messages(id)
     )
     """)
+
+    try:
+        cur.execute("ALTER TABLE message_comments ADD COLUMN created_at_str TEXT")
+    except Exception:
+        pass
 
     db.commit()
     db.close()
@@ -111,7 +146,8 @@ CREATE TABLE IF NOT EXISTS contacts (
             lid TEXT,
             phone TEXT,
             status TEXT,
-            created_at BIGINT
+            created_at BIGINT,
+            created_at_str TEXT
         )
         """)
 
@@ -140,7 +176,9 @@ CREATE TABLE IF NOT EXISTS contacts (
             media_path TEXT,
             timestamp BIGINT,
             status TEXT,
-            created_at BIGINT
+            created_at BIGINT,
+            timestamp_str TEXT,
+            created_at_str TEXT
         )
         """)
 
@@ -149,9 +187,38 @@ CREATE TABLE IF NOT EXISTS contacts (
             id SERIAL PRIMARY KEY,
             message_id INTEGER REFERENCES messages(id),
             comment TEXT,
-            created_at BIGINT
+            created_at BIGINT,
+            created_at_str TEXT
         )
         """)
+
+        cur_pg.execute(
+            "ALTER TABLE login_sessions ADD COLUMN IF NOT EXISTS created_at_str TEXT"
+        )
+
+        cur_pg.execute(
+            "ALTER TABLE contacts ADD COLUMN IF NOT EXISTS last_seen_at_str TEXT"
+        )
+
+        cur_pg.execute(
+            "ALTER TABLE contacts ADD COLUMN IF NOT EXISTS created_at_str TEXT"
+        )
+
+        cur_pg.execute(
+            "ALTER TABLE contacts ADD COLUMN IF NOT EXISTS updated_at_str TEXT"
+        )
+
+        cur_pg.execute(
+            "ALTER TABLE messages ADD COLUMN IF NOT EXISTS timestamp_str TEXT"
+        )
+
+        cur_pg.execute(
+            "ALTER TABLE messages ADD COLUMN IF NOT EXISTS created_at_str TEXT"
+        )
+
+        cur_pg.execute(
+            "ALTER TABLE message_comments ADD COLUMN IF NOT EXISTS created_at_str TEXT"
+        )
 
         pg.commit()
         pg.close()

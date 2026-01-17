@@ -9,6 +9,8 @@ const FASTAPI_PORT = process.env.FASTAPI_PORT || "3002";
 const FASTAPI_BASE = `http://${FASTAPI_HOST}:${FASTAPI_PORT}`;
 const FASTAPI_MESSAGE_WEBHOOK = `${FASTAPI_BASE}/webhook/message`;
 const FASTAPI_RECEIPT_WEBHOOK = `${FASTAPI_BASE}/webhook/receipt`;
+const FASTAPI_PRESENCE_WEBHOOK = `${FASTAPI_BASE}/webhook/presence`;
+const FASTAPI_MEDIA_WEBHOOK = `${FASTAPI_BASE}/webhook/media`;
 
 /**
  * Push events to FastAPI
@@ -18,10 +20,15 @@ const FASTAPI_RECEIPT_WEBHOOK = `${FASTAPI_BASE}/webhook/receipt`;
  */
 export async function pushToFastAPI(payload: any) {
   try {
-    const url =
-      payload?.type === "receipt"
-        ? FASTAPI_RECEIPT_WEBHOOK
-        : FASTAPI_MESSAGE_WEBHOOK;
+    let url = FASTAPI_MESSAGE_WEBHOOK;
+
+    if (payload?.type === "receipt") {
+      url = FASTAPI_RECEIPT_WEBHOOK;
+    } else if (payload?.type === "presence") {
+      url = FASTAPI_PRESENCE_WEBHOOK;
+    } else if (payload?.type === "media") {
+      url = FASTAPI_MEDIA_WEBHOOK;
+    }
 
     await fetch(url, {
       method: "POST",

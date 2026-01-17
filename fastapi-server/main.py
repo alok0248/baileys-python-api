@@ -303,6 +303,9 @@ async def webhook_receipt(request: Request):
 async def webhook_message(request: Request):
     payload = await request.json()
 
+    if payload.get("type") in ("presence", "media") or payload.get("from") == "status@broadcast":
+        return {"status": "ignored"}
+
     content_text = (
         payload.get("message")
         or payload.get("text")
@@ -319,6 +322,7 @@ async def webhook_message(request: Request):
         timestamp=payload.get("timestamp"),
         status="delivered",
         phone=payload.get("phone"),
+        name=payload.get("name"),
     )
 
     print("📩 Stored message:", payload)
@@ -367,6 +371,49 @@ def get_chats():
     r = requests.get(f"{NODE_BASE_URL}/chats", timeout=5)
     r.raise_for_status()
     return r.json()
+
+
+@app.post("/sync/contacts")
+def sync_contacts():
+    try:
+        r = requests.get(f"{NODE_BASE_URL}/chats", timeout=15)
+        r.raise_for_status()
+        chats = r.json()
+    except requests.RequestException as e:
+        raise HTTPException(status_code=503, detail=str(e))
+
+    if not isinstance(chats, list):
+        return {"synced": 0}
+
+    synced = 0
+
+    for chat in chats:
+        if not isinstance(chat, dict):
+            continue
+
+        jid = chat.get("jid")
+
+        if not isinstance(jid, str) or not jid or jid == "status@broadcast":
+            continue
+
+        name = chat.get("name")
+        last_ts = chat.get("lastTimestamp")
+
+        phone = None
+        if jid.endswith("@s.whatsapp.net"):
+            phone = jid.split("@")[0]
+
+        update_contact_presence(
+            jid=jid,
+            phone=phone,
+            name=name,
+            is_online=False,
+            last_seen_at=last_ts if isinstance(last_ts, int) else None,
+        )
+
+        synced += 1
+
+    return {"synced": synced}
 
 
 # ============================================================

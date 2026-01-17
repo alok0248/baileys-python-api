@@ -242,6 +242,7 @@ export async function startWhatsApp() {
         msg.message?.documentMessage) {
 
       const phone = extractPhoneFromMessage(msg);
+      const name = msg.pushName || null;
 
       saveIncomingMedia(msg).then((media) => {
         pushToFastAPI({
@@ -249,6 +250,7 @@ export async function startWhatsApp() {
           direction: "in",
           from: msg.key.remoteJid,
           phone,
+          name,
           messageId: msg.key.id,
           messageType: "media",
           filePath: media.filePath,
@@ -273,10 +275,12 @@ export async function startWhatsApp() {
 
     const jid = msg.key.remoteJid!;
     const phone = extractPhoneFromMessage(msg);
+    const name = msg.pushName || null;
 
     const payload = {
       from: jid,
       phone,
+      name,
       message: text,
       timestamp: Date.now()
     };
